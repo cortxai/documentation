@@ -2,7 +2,7 @@
 
 **Project:** CortX\
 **Organisation:** cortxai\
-**Current Version:** v0.2.0\
+**Current Version:** v0.3.15\
 **Status:** Alpha
 
 ------------------------------------------------------------------------
@@ -48,7 +48,7 @@ The long‑term architecture will consist of three conceptual layers:
     -   Provide a complete runnable platform
     -   Example: `cortx_local`
 
-The existing implementation (v0.2.0) will eventually become the first
+The existing implementation (v0.3.15) will eventually become the first
 **distribution**.
 
 ------------------------------------------------------------------------
@@ -72,32 +72,38 @@ The existing implementation (v0.2.0) will eventually become the first
 
 ------------------------------------------------------------------------
 
-# Current Implementation Summary (v0.2.0)
+# Current Implementation Summary (v0.3.0)
 
-The current PoC implements:
+The current implementation introduces the **COREtex runtime platform**, separating the system into a reusable runtime, pluggable modules, and assembled distributions.
 
 Pipeline:
 
 User Input\
-→ Classifier LLM\
+→ Classifier (deterministic prefix checks → LLM fallback)\
 → Deterministic Router\
 → Worker LLM\
+→ Agent JSON Action\
 → Tool Execution Layer
 
 Key properties:
 
+-   Modular runtime architecture (`coretex/`, `modules/`, `distributions/`)
 -   Stateless request pipeline
--   Exactly two LLM calls
--   Deterministic routing
--   Tools executed only via ToolExecutor
+-   Exactly two LLM calls per successful request
+-   Deterministic routing with no LLM involvement
+-   Agent outputs structured JSON action envelopes
+-   Tools executed only via `ToolExecutor`
 -   Local model inference via Ollama
--   Structured logging
--   Fully tested tool execution layer
+-   Module loading via a runtime module registry
+-   Structured logging with request correlation IDs
+-   OpenAI-compatible API shim for OpenWebUI
+-   Fully mocked test suite covering the entire runtime
 
-The system currently behaves like an **application** rather than a
-**platform runtime**.
+The system now behaves as a **runtime platform** capable of supporting
+multiple modules and distributions.
 
-The next phases focus on **architectural restructuring**.
+The next phase focuses on **runtime stabilisation, module validation,
+and observability improvements**.
 
 ------------------------------------------------------------------------
 
@@ -123,113 +129,453 @@ Version **v1.0.0** marks the end of the alpha/beta period.
 
 # Next Phase
 
-# v0.3.0 --- Runtime Extraction
+# v0.3.X --- Stablisation
 
 Goal:
 
-Transform the current application architecture into a **CortX runtime
-platform**.
+Harden the runtime, validate the module architecture, improve observability, and expand test coverage
 
-This is the most important architectural step.
-
-------------------------------------------------------------------------
-
-## Objectives
-
-Introduce a **runtime layer** that owns:
-
--   request lifecycle
--   pipeline execution
--   module loading
--   event system
--   registries
-
-Current logic must be refactored so components become **modules**, not
-hardcoded imports.
+No major architectural additions are permitted in this phase.
 
 ------------------------------------------------------------------------
 
-## New Directory Structure
+# Objectives
 
-Target repository layout:
-
-cortx/ runtime/ interfaces/ registry/ config/
-
-modules/ distributions/ tests/
-
-------------------------------------------------------------------------
-
-## Runtime Responsibilities
-
-Runtime should implement:
-
--   pipeline execution engine
--   module loader
--   system event bus
--   execution context
--   registry management
-
-Runtime must **not contain implementations** of classifiers, tools, or
-workers.
+Focus on:
+- runtime stability
+- module system validation
+- logging improvements
+- documentation
+- expanded test coverage
 
 ------------------------------------------------------------------------
 
-## Interfaces Layer
+# Section 1 — Runtime Stability
 
-Define interfaces for:
+The runtime layer in coretex/runtime/ must become robust against all failure modes.
 
-Classifier\
-Worker\
-Router\
-Tool\
-ModelProvider
+## 1.1 Harden PipelineRunner
 
-These interfaces define how modules integrate with the runtime.
+File:
+```
+coretex/runtime/pipeline.py
+```
+
+### Required Improvements
+
+#### Explicit Failure Categories
+
+Introduce explicit error categories inside the pipeline:
+```
+ClassificationFailure
+WorkerFailure
+ToolExecutionFailure
+AgentParseFailure
+```
+
+These should not introduce new classes unless necessary — simple exception categorisation is acceptable.
+
+Failures should be logged consistently.
+
+Example:
+```
+event=pipeline_classifier_failure
+event=pipeline_worker_failure
+event=pipeline_tool_failure
+event=pipeline_agent_parse_failure
+```
+
+### Defensive Behaviour
+
+Ensure the pipeline:
+
+|Failure                 |Behaviour                        |
+|------------------------|---------------------------------|
+|Classifier HTTP failure |fallback → ambiguous             |
+|Worker HTTP failurere   |turn worker failure response     |
+|Tool lookup failure     |worker failure response          |
+|Tool runtime exception  |worker failure response          |
+|Agent JSON parse failure|treat raw output as text response|
+
+This behaviour already partially exists but must be consistent and logged.
+
+## 1.2 Standardise Pipeline Logging
+
+Every request should produce a complete traceable log chain.
+
+Expected log lifecycle:
+```
+event=request_received
+event=classifier_start
+event=classifier_complete
+event=router_selected
+event=worker_start
+event=worker_complete
+event=agent_output_received
+event=tool_execute
+event=tool_execute_complete
+event=request_complete
+```
+
+All logs must include:
+```
+request_id
+intent (when known)
+handler
+duration_ms (when applicable)
+```
+
+## 1.3 ExecutionContext Expansion (Minor Only)
+
+File:
+```
+coretex/runtime/context.py
+```
+
+Add optional metadata fields:
+```
+metadata: dict[str, Any] | None
+timestamp: float
+```
+
+These should not change pipeline behaviour.
+
+Purpose: improve observability.
 
 ------------------------------------------------------------------------
 
-## Registry Layer
+# Section 2 — Module System Validation
 
-Introduce registries for:
+The module system introduced in v0.3.0 must be validated to ensure:
+- modules cannot corrupt runtime state
+- duplicate registrations are prevented
+- missing dependencies are detected
 
-ModuleRegistry\
-ToolRegistry\
-ModelProviderRegistry\
-PipelineRegistry
+## 2.1 Registry Validation
 
-Modules register themselves during runtime initialization.
+Registries must enforce strict duplicate detection.
+
+Affected files:
+```
+coretex/registry/module_registry.py
+coretex/registry/tool_registry.py
+coretex/registry/model_registry.py
+coretex/registry/pipeline_registry.py
+```
+
+Requirements:
+
+### Duplicate Registration
+
+All `register_*` functions must raise:
+```
+ValueError("Component already registered: <name>")
+Unknown Lookup
+```
+
+All `get()` methods must raise:
+```
+ValueError("Unknown component: <name>")
+```
+
+And log:
+```
+event=registry_lookup_failed
+component=<type>
+name=<name>
+```
+
+## 2.2 ModuleLoader Validation
+
+File:
+```
+coretex/runtime/loader.py
+```
+
+The loader must:
+- Import the module
+- Verify `register()` exists
+- Execute `register()`
+
+Add validation steps:
+
+### Validate Signature
+
+`register()` must accept:
+```
+register(module_registry, tool_registry, model_registry)
+```
+
+If incorrect:
+```
+ValueError("Invalid module register() signature")
+```
+
+### Detect Partial Registration
+
+Log warnings when a module registers nothing.
+```
+event=module_loaded
+module=<name>
+registered_components=<count>
+```
+
+## 2.3 Module Loading Logs
+
+Startup logs should show:
+```
+event=module_loading_start
+event=module_loaded
+event=module_loading_complete
+```
+
+Example:
+```
+module=classifier_basic
+components=1
+```
 
 ------------------------------------------------------------------------
 
-## Refactor Existing Code into Modules
+# Section 3 — Logging & Observability Improvements
 
-Current components become modules:
+Logging must be **machine-readable**.
 
-classifier.py → classifier_basic module
+## 3.1 Structured Logging Format
 
-router.py → router_simple module
+Use structured key=value logs.
 
-worker.py → worker_llm module
+Example:
+```
+event=classifier_complete request_id=abc intent=execution confidence=0.92 duration_ms=312
+```
 
-filesystem tool → tools_filesystem module
+Do NOT introduce external logging libraries.
 
-ollama integration → model_provider_ollama module
+Use Python `logging`.
 
-Modules must expose a **registration entrypoint**.
+## 3.2 Request Duration Metrics
+
+Add timing measurements to:
+- classifier
+- worker
+- pipeline total
+
+Example:
+```
+duration_ms
+```
+
+## 3.3 Router Debug Improvements
+
+File:
+```
+modules/router_simple/router.py
+```
+
+When settings.debug_router == True log:
+```
+event=router_decision
+intent=<intent>
+handler=<handler>
+```
 
 ------------------------------------------------------------------------
 
-# v0.3.X --- Stabilisation
+# Section 4 — Test Coverage Expansion
 
-Minor releases in the v0.3 series should focus on:
+Current tests: 64
 
--   runtime stability
--   module system validation
--   logging improvements
--   documentation
--   expanded test coverage
+Target: 100+ tests
 
-No major architectural additions should occur here.
+All tests remain in:
+```
+tests/test_smoke.py
+```
+
+Do not split files yet.
+
+## 4.1 Registry Tests
+
+Add tests for:
+```
+duplicate tool registration
+duplicate module registration
+unknown tool lookup
+unknown classifier lookup
+unknown worker lookup
+```
+
+## 4.2 ModuleLoader Tests
+
+Test cases:
+
+|Scenario                   |Expected Result|
+|---------------------------|---------------|
+|module missing `register()`|failure        |
+|register wrong signature   |failure        |
+|module registers nothing   |warning        |
+|module registers components|success        |
+
+## 4.3 Tool Executor Tests
+
+Add tests for:
+```
+tool execution success
+unknown tool
+tool runtime exception
+respond action bypass
+invalid action
+```
+
+## 4.4 Pipeline Failure Tests
+
+Mock scenarios:
+```
+classifier HTTP failure
+worker HTTP failure
+invalid JSON output
+tool lookup failure
+tool runtime exception
+```
+
+Verify correct fallback responses.
+
+## 4.5 Logging Tests
+
+Capture logs and assert presence of:
+```
+request_received
+classifier_complete
+router_selected
+worker_complete
+request_complete
+```
+
+------------------------------------------------------------------------
+
+# Section 5 — Documentation
+
+The runtime extraction introduced new architectural concepts.
+
+Documentation must reflect them.
+
+## 5.1 Add COREtex Runtime Documentation
+
+Create:
+```
+docs/runtime.md
+```
+
+Contents:
+- runtime responsibilities
+- module architecture
+- registries
+- pipeline execution flow
+- failure behaviour
+
+## 5.2 Module Development Guide
+
+Create:
+```
+docs/module_development.md
+```
+
+Explain:
+- module directory structure
+- required register() function
+- component registration
+- best practices
+- common errors
+
+## 5.3 Distribution Guide
+
+Create:
+```
+docs/distributions.md
+```
+
+Explain:
+- how to build a distribution
+- how bootstrap works
+- how to load modules
+
+------------------------------------------------------------------------
+
+# Section 6 — Minor Code Quality Improvements
+
+These are safe refactors.
+
+## 6.1 Type Hint Improvements
+
+Ensure full typing coverage in:
+```
+runtime/
+registry/
+interfaces/
+```
+
+Avoid Any unless unavoidable.
+
+## 6.2 Docstrings
+
+Add docstrings to:
+```
+PipelineRunner
+ToolExecutor
+ModuleLoader
+ToolRegistry
+ModuleRegistry
+```
+
+## 6.3 Consistent Naming
+
+Ensure all event logs follow:
+```
+event=<name>
+```
+
+No mixed formats.
+
+------------------------------------------------------------------------
+
+# Non-Goals (Must Not Be Implemented)
+
+The following must not be added in v0.3.x:
+- memory systems
+- conversation history
+- task graphs
+- planners
+- multi-agent coordination
+- streaming responses
+- authentication
+- distributed runtime
+- additional model providers
+- async tool execution
+- plugin dependency graphs
+
+------------------------------------------------------------------------
+
+# Acceptance Criteria
+
+The stabilisation phase is complete when:
+- runtime behaviour is deterministic
+- logging provides full request traces
+- module loading is validated
+- registry safety is guaranteed
+- test count exceeds 100
+- runtime documentation exists
+- all tests pass with Ollama fully mocked
+
+------------------------------------------------------------------------
+
+# Expected Outcome
+
+After v0.3.x stabilisation, COREtex will be:
+- a stable agentic runtime kernel
+- safely extensible through modules
+- observable via structured logs
+- thoroughly tested
 
 ------------------------------------------------------------------------
 
