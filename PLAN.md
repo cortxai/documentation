@@ -1,111 +1,77 @@
 # CortX Development Plan (Alpha Roadmap)
 
-**Project:** CortX\
-**Organisation:** cortxai\
-**Current Version:** v0.3.15\
+**Project:** CortX
+**Organisation:** cortxai
+**Current Version:** v0.4.0
 **Status:** Alpha
 
-------------------------------------------------------------------------
+---
 
 # Purpose of this Document
 
 This document provides a **structured implementation roadmap** for CortX
 that can be ingested by an LLM coding assistant. It explains:
 
--   The **current architectural state**
--   The **next implementation phase**
--   A **versioned roadmap** for upcoming phases
--   **Architectural constraints** that must remain true
--   **Non-goals** (features intentionally deferred)
+* The **current architectural state**
+* The **next implementation phase (v0.4.0)**
+* A **versioned roadmap** for upcoming phases
+* **Architectural constraints** that must remain true
+* **Non-goals** (features intentionally deferred)
 
 The goal is to guide development toward the long‑term vision of CortX as
 a **local‑first runtime platform for intelligent systems**.
 
-------------------------------------------------------------------------
+---
 
 # Architectural Vision
 
 CortX is evolving from a proof‑of‑concept **local agentic system** into
 a **platform runtime for intelligent software systems**.
 
-The long‑term architecture will consist of three conceptual layers:
+The long‑term architecture consists of three conceptual layers:
 
-1.  **CortX Runtime**
-    -   Core execution environment
-    -   Module loading
-    -   Pipeline orchestration
-    -   Event system
-2.  **CortX Modules**
-    -   Extensions that implement platform capabilities
-    -   Classifiers
-    -   Workers
-    -   Routers
-    -   Model providers
-    -   Tools
-    -   Infrastructure integrations
-3.  **CortX Distributions**
-    -   Opinionated system builds
-    -   Provide a complete runnable platform
-    -   Example: `cortx_local`
+1. **CortX Runtime**
 
-The existing implementation (v0.3.15) will eventually become the first
-**distribution**.
+   * Core execution environment
+   * Module loading
+   * Pipeline orchestration
+   * Event system
+2. **CortX Modules**
 
-------------------------------------------------------------------------
+   * Extensions that implement platform capabilities
+   * Classifiers
+   * Workers
+   * Routers
+   * Model providers
+   * Tools
+   * Infrastructure integrations
+3. **CortX Distributions**
+
+   * Opinionated system builds
+   * Provide a complete runnable platform
+   * Example: `cortx_local`
+
+---
 
 # Architectural Rules (Must Never Be Violated)
 
-1.  **Core must remain small**
-    -   Runtime contains primitives only
-    -   No integrations or application logic
-2.  **Everything must be replaceable**
-    -   Models
-    -   tools
-    -   classifiers
-    -   workers
-    -   routers
-3.  **Modules extend the runtime**
-    -   Runtime must never depend on modules
-4.  **Intelligence must be explicit pipelines**
-    -   Avoid opaque agent frameworks
-5.  **Distributions are separate from the runtime**
+1. **Core must remain small** — Runtime contains primitives only
+2. **Everything must be replaceable** — Models, tools, classifiers, workers, routers
+3. **Modules extend the runtime** — Runtime must never depend on modules
+4. **Intelligence must be explicit pipelines** — Avoid opaque agent frameworks
+5. **Distributions are separate from the runtime**
 
-------------------------------------------------------------------------
+---
 
-# Current Implementation Summary (v0.3.0)
+# Current Implementation Summary (v0.3.x Stabilisation)
 
-The current implementation introduces the **COREtex runtime platform**, separating the system into a reusable runtime, pluggable modules, and assembled distributions.
+* COREtex runtime with `coretex/` (runtime, interfaces, registries, executor, pipeline, loader, context, events, config)
+* `modules/` implementing classifier_basic, router_simple, worker_llm, tools_filesystem, model_provider_ollama
+* `distributions/cortx/` with FastAPI endpoints and module bootstrap
+* **Pipeline:** User Input → Classifier → Router → Worker → ToolExecutor
+* Fully modular runtime, deterministic two-stage LLM calls, structured logging, ModuleLoader validation, registry safety, 106 tests, documentation
 
-Pipeline:
-
-User Input\
-→ Classifier (deterministic prefix checks → LLM fallback)\
-→ Deterministic Router\
-→ Worker LLM\
-→ Agent JSON Action\
-→ Tool Execution Layer
-
-Key properties:
-
--   Modular runtime architecture (`coretex/`, `modules/`, `distributions/`)
--   Stateless request pipeline
--   Exactly two LLM calls per successful request
--   Deterministic routing with no LLM involvement
--   Agent outputs structured JSON action envelopes
--   Tools executed only via `ToolExecutor`
--   Local model inference via Ollama
--   Module loading via a runtime module registry
--   Structured logging with request correlation IDs
--   OpenAI-compatible API shim for OpenWebUI
--   Fully mocked test suite covering the entire runtime
-
-The system now behaves as a **runtime platform** capable of supporting
-multiple modules and distributions.
-
-The next phase focuses on **runtime stabilisation, module validation,
-and observability improvements**.
-
-------------------------------------------------------------------------
+---
 
 # Versioning Strategy
 
@@ -115,640 +81,170 @@ Version numbers follow the format:
 
 Where:
 
-N = **major architectural changes**\
-X = **minor improvements**
+* N = **major architectural changes**
+* X = **minor improvements**
 
 Examples:
 
-v0.3.0 → major architectural change\
-v0.3.1 → minor improvements or fixes
+* v0.3.0 → major architectural change
+* v0.3.1 → minor improvements or fixes
 
 Version **v1.0.0** marks the end of the alpha/beta period.
 
-------------------------------------------------------------------------
+---
 
-# Next Phase
+# v0.4.0 --- Pipeline System
 
-# v0.3.X --- Stablisation
+## Goal
 
-Goal:
+Introduce **configurable execution pipelines**. The current hardcoded pipeline will be replaced by a structured, modular pipeline system that allows future pipelines to include planners, evaluators, or alternative tool graphs without modifying the runtime core.
 
-Harden the runtime, validate the module architecture, improve observability, and expand test coverage
+---
 
-No major architectural additions are permitted in this phase.
+## Implementation Plan
 
-------------------------------------------------------------------------
-
-# Objectives
-
-Focus on:
-- runtime stability
-- module system validation
-- logging improvements
-- documentation
-- expanded test coverage
-
-------------------------------------------------------------------------
-
-# Section 1 — Runtime Stability
-
-The runtime layer in coretex/runtime/ must become robust against all failure modes.
-
-## 1.1 Harden PipelineRunner
+### 1 — PipelineRegistry Enhancements
 
 File:
+
 ```
-coretex/runtime/pipeline.py
-```
-
-### Required Improvements
-
-#### Explicit Failure Categories
-
-Introduce explicit error categories inside the pipeline:
-```
-ClassificationFailure
-WorkerFailure
-ToolExecutionFailure
-AgentParseFailure
-```
-
-These should not introduce new classes unless necessary — simple exception categorisation is acceptable.
-
-Failures should be logged consistently.
-
-Example:
-```
-event=pipeline_classifier_failure
-event=pipeline_worker_failure
-event=pipeline_tool_failure
-event=pipeline_agent_parse_failure
-```
-
-### Defensive Behaviour
-
-Ensure the pipeline:
-
-|Failure                 |Behaviour                        |
-|------------------------|---------------------------------|
-|Classifier HTTP failure |fallback → ambiguous             |
-|Worker HTTP failurere   |turn worker failure response     |
-|Tool lookup failure     |worker failure response          |
-|Tool runtime exception  |worker failure response          |
-|Agent JSON parse failure|treat raw output as text response|
-
-This behaviour already partially exists but must be consistent and logged.
-
-## 1.2 Standardise Pipeline Logging
-
-Every request should produce a complete traceable log chain.
-
-Expected log lifecycle:
-```
-event=request_received
-event=classifier_start
-event=classifier_complete
-event=router_selected
-event=worker_start
-event=worker_complete
-event=agent_output_received
-event=tool_execute
-event=tool_execute_complete
-event=request_complete
-```
-
-All logs must include:
-```
-request_id
-intent (when known)
-handler
-duration_ms (when applicable)
-```
-
-## 1.3 ExecutionContext Expansion (Minor Only)
-
-File:
-```
-coretex/runtime/context.py
-```
-
-Add optional metadata fields:
-```
-metadata: dict[str, Any] | None
-timestamp: float
-```
-
-These should not change pipeline behaviour.
-
-Purpose: improve observability.
-
-------------------------------------------------------------------------
-
-# Section 2 — Module System Validation
-
-The module system introduced in v0.3.0 must be validated to ensure:
-- modules cannot corrupt runtime state
-- duplicate registrations are prevented
-- missing dependencies are detected
-
-## 2.1 Registry Validation
-
-Registries must enforce strict duplicate detection.
-
-Affected files:
-```
-coretex/registry/module_registry.py
-coretex/registry/tool_registry.py
-coretex/registry/model_registry.py
 coretex/registry/pipeline_registry.py
+```
+
+Tasks:
+
+1. Implement `PipelineRegistry` as a fully validated registry.
+2. Support `register(name: str, pipeline: PipelineDefinition)` and `get(name: str) -> PipelineDefinition`.
+3. Enforce:
+
+   * Duplicate registration raises `ValueError("Pipeline already registered: <name>")`
+   * Unknown lookup raises `ValueError("Unknown pipeline: <name>")` and logs `event=registry_lookup_failed`
+4. Add `list()` to enumerate registered pipelines.
+
+### 2 — Pipeline Definition Objects
+
+Create `PipelineDefinition` dataclass in `coretex/runtime/pipeline.py`:
+
+```python
+@dataclass
+class PipelineStep:
+    component_type: Literal['classifier','router','worker','tool_executor']
+    name: str  # Name in the registry
+
+@dataclass
+class PipelineDefinition:
+    steps: list[PipelineStep]
 ```
 
 Requirements:
 
-### Duplicate Registration
+* Must support validation of step types and existence in registry.
+* Runtime will raise descriptive error on invalid steps.
 
-All `register_*` functions must raise:
-```
-ValueError("Component already registered: <name>")
-Unknown Lookup
-```
-
-All `get()` methods must raise:
-```
-ValueError("Unknown component: <name>")
-```
-
-And log:
-```
-event=registry_lookup_failed
-component=<type>
-name=<name>
-```
-
-## 2.2 ModuleLoader Validation
+### 3 — PipelineRunner Refactor
 
 File:
+
 ```
-coretex/runtime/loader.py
-```
-
-The loader must:
-- Import the module
-- Verify `register()` exists
-- Execute `register()`
-
-Add validation steps:
-
-### Validate Signature
-
-`register()` must accept:
-```
-register(module_registry, tool_registry, model_registry)
+coretex/runtime/pipeline.py
 ```
 
-If incorrect:
-```
-ValueError("Invalid module register() signature")
-```
+Changes:
 
-### Detect Partial Registration
+* Accept `pipeline: PipelineDefinition` as argument.
+* Dynamically iterate through `steps`, executing each by type:
 
-Log warnings when a module registers nothing.
-```
-event=module_loaded
-module=<name>
-registered_components=<count>
-```
+  * Classifier → retrieve from ModuleRegistry
+  * Router → retrieve from ModuleRegistry
+  * Worker → retrieve from ModuleRegistry
+  * ToolExecutor → always same executor
+* Preserve structured logging and failure categories for each step.
+* Maintain existing deterministic behaviour.
 
-## 2.3 Module Loading Logs
+### 4 — Backward Compatibility
 
-Startup logs should show:
-```
-event=module_loading_start
-event=module_loaded
-event=module_loading_complete
-```
+* Provide a default `default_pipeline` matching existing behaviour:
 
-Example:
-```
-module=classifier_basic
-components=1
-```
+  ```
+  User Input → ClassifierBasic → RouterSimple → WorkerLLM → ToolExecutor
+  ```
+* Ensure `POST /ingest` and OpenWebUI continue working with default pipeline.
 
-------------------------------------------------------------------------
+### 5 — Observability
 
-# Section 3 — Logging & Observability Improvements
+* Log pipeline name: `event=pipeline_selected pipeline=<name>`
+* Step-level logging remains: `event=step_start`, `event=step_complete` with duration_ms
+* Preserve existing latency metrics for classifier, worker, total pipeline
 
-Logging must be **machine-readable**.
+### 6 — Tests
 
-## 3.1 Structured Logging Format
+* Add unit tests for PipelineRegistry (duplicate, unknown lookup)
+* PipelineRunner tests with multiple pipeline definitions
+* Verify full log lifecycle for custom pipelines
+* Ensure backward compatibility with default pipeline
+* Update test count target: 120+ tests
 
-Use structured key=value logs.
+---
 
-Example:
-```
-event=classifier_complete request_id=abc intent=execution confidence=0.92 duration_ms=312
-```
+# High-Level Roadmap After v0.4.0
 
-Do NOT introduce external logging libraries.
+## v0.4.X — Model Provider System
 
-Use Python `logging`.
+* Introduce `ModelProvider` abstraction
+* Implement `model_provider_ollama` module
+* Enable hybrid model strategies (future: OpenAI, Anthropic, llama.cpp)
+* Maintain backward-compatible worker behaviour
 
-## 3.2 Request Duration Metrics
+## v0.5.0 — Distribution Layer
 
-Add timing measurements to:
-- classifier
-- worker
-- pipeline total
+* Introduce first **CortX distributions** (e.g., `cortx_local`)
+* Assemble runtime + modules + FastAPI + OpenWebUI
+* Support bootstrapped module loading
 
-Example:
-```
-duration_ms
-```
+## v0.6.0 — Event System
 
-## 3.3 Router Debug Improvements
+* Runtime-wide **event bus**
+* Every important action emits structured events
+* Enable debugging, observability, metrics, future monitoring integrations
 
-File:
-```
-modules/router_simple/router.py
-```
+## v0.7.0 — Move Tool System into Modules
 
-When settings.debug_router == True log:
-```
-event=router_decision
-intent=<intent>
-handler=<handler>
-```
+* Refactor tool system into modules
+* Example: `tools_filesystem`, `tools_shell`, `tools_http`, `tools_git`
+* Users can add, disable, or create third-party tools
+* Completes **core modular architecture**
 
-------------------------------------------------------------------------
+---
 
-# Section 4 — Test Coverage Expansion
+# Non-Goals (v0.4.x)
 
-Current tests: 64
+* Memory / conversation history
+* Multi-agent coordination
+* Task Graph / Planner orchestration (outside pipeline system)
+* Authentication / authorization
+* Async tool execution
+* Additional model providers (beyond Ollama)
+* Distributed runtime or inference
 
-Target: 100+ tests
+---
 
-All tests remain in:
-```
-tests/test_smoke.py
-```
+# Acceptance Criteria for v0.4.0
 
-Do not split files yet.
+* PipelineRegistry supports dynamic pipelines with validation
+* PipelineRunner executes all steps according to pipeline definition
+* Full structured logging preserved, including step-level latency
+* Default pipeline behaves identically to pre-v0.4.0 pipeline
+* Test suite expanded to 120+ tests covering custom pipelines
+* No regressions in /ingest or OpenWebUI endpoints
 
-## 4.1 Registry Tests
-
-Add tests for:
-```
-duplicate tool registration
-duplicate module registration
-unknown tool lookup
-unknown classifier lookup
-unknown worker lookup
-```
-
-## 4.2 ModuleLoader Tests
-
-Test cases:
-
-|Scenario                   |Expected Result|
-|---------------------------|---------------|
-|module missing `register()`|failure        |
-|register wrong signature   |failure        |
-|module registers nothing   |warning        |
-|module registers components|success        |
-
-## 4.3 Tool Executor Tests
-
-Add tests for:
-```
-tool execution success
-unknown tool
-tool runtime exception
-respond action bypass
-invalid action
-```
-
-## 4.4 Pipeline Failure Tests
-
-Mock scenarios:
-```
-classifier HTTP failure
-worker HTTP failure
-invalid JSON output
-tool lookup failure
-tool runtime exception
-```
-
-Verify correct fallback responses.
-
-## 4.5 Logging Tests
-
-Capture logs and assert presence of:
-```
-request_received
-classifier_complete
-router_selected
-worker_complete
-request_complete
-```
-
-------------------------------------------------------------------------
-
-# Section 5 — Documentation
-
-The runtime extraction introduced new architectural concepts.
-
-Documentation must reflect them.
-
-## 5.1 Add COREtex Runtime Documentation
-
-Create:
-```
-docs/runtime.md
-```
-
-Contents:
-- runtime responsibilities
-- module architecture
-- registries
-- pipeline execution flow
-- failure behaviour
-
-## 5.2 Module Development Guide
-
-Create:
-```
-docs/module_development.md
-```
-
-Explain:
-- module directory structure
-- required register() function
-- component registration
-- best practices
-- common errors
-
-## 5.3 Distribution Guide
-
-Create:
-```
-docs/distributions.md
-```
-
-Explain:
-- how to build a distribution
-- how bootstrap works
-- how to load modules
-
-------------------------------------------------------------------------
-
-# Section 6 — Minor Code Quality Improvements
-
-These are safe refactors.
-
-## 6.1 Type Hint Improvements
-
-Ensure full typing coverage in:
-```
-runtime/
-registry/
-interfaces/
-```
-
-Avoid Any unless unavoidable.
-
-## 6.2 Docstrings
-
-Add docstrings to:
-```
-PipelineRunner
-ToolExecutor
-ModuleLoader
-ToolRegistry
-ModuleRegistry
-```
-
-## 6.3 Consistent Naming
-
-Ensure all event logs follow:
-```
-event=<name>
-```
-
-No mixed formats.
-
-------------------------------------------------------------------------
-
-# Non-Goals (Must Not Be Implemented)
-
-The following must not be added in v0.3.x:
-- memory systems
-- conversation history
-- task graphs
-- planners
-- multi-agent coordination
-- streaming responses
-- authentication
-- distributed runtime
-- additional model providers
-- async tool execution
-- plugin dependency graphs
-
-------------------------------------------------------------------------
-
-# Acceptance Criteria
-
-The stabilisation phase is complete when:
-- runtime behaviour is deterministic
-- logging provides full request traces
-- module loading is validated
-- registry safety is guaranteed
-- test count exceeds 100
-- runtime documentation exists
-- all tests pass with Ollama fully mocked
-
-------------------------------------------------------------------------
+---
 
 # Expected Outcome
 
-After v0.3.x stabilisation, COREtex will be:
-- a stable agentic runtime kernel
-- safely extensible through modules
-- observable via structured logs
-- thoroughly tested
+After v0.4.0, COREtex will:
 
-------------------------------------------------------------------------
+* Support **configurable pipelines**
+* Maintain full determinism and observability
+* Remain fully modular, extensible, and testable
+* Provide a foundation for hybrid model providers and pipeline extensions in future phases
 
-# v0.4.0 --- Pipeline System
-
-Goal:
-
-Introduce configurable **execution pipelines**.
-
-The current pipeline is hardcoded.
-
-Instead pipelines should be defined as structured execution graphs.
-
-Example:
-
-Input → Classifier → Router → Worker → ToolExecutor
-
-Future pipelines may include planners, evaluators, or tool graphs.
-
-Pipelines should be configurable without modifying runtime code.
-
-------------------------------------------------------------------------
-
-# v0.4.X --- Model Provider System
-
-Introduce a **model provider abstraction layer**.
-
-Define interface:
-
-ModelProvider
-
-Methods:
-
-generate() chat()
-
-Implement first provider module:
-
-model_provider_ollama
-
-Future providers may include:
-
-OpenAI Anthropic llama.cpp other local inference engines
-
-This enables hybrid model strategies.
-
-------------------------------------------------------------------------
-
-# v0.5.0 --- Distribution Layer
-
-Goal:
-
-Introduce **CortX distributions**.
-
-Create first distribution:
-
-cortx_local
-
-This distribution includes:
-
-runtime basic modules ollama provider filesystem tool FastAPI ingress
-OpenWebUI integration
-
-The existing system behaviour should remain unchanged.
-
-The difference is that it is now assembled from runtime + modules.
-
-------------------------------------------------------------------------
-
-# v0.6.0 --- Event System
-
-Goal:
-
-Introduce a runtime **event bus**.
-
-Every important system action should emit events.
-
-Examples:
-
-request_received intent_detected model_invoked tool_called
-response_generated
-
-This allows:
-
-debugging observability metrics future monitoring integrations
-
-------------------------------------------------------------------------
-
-# v0.7.0 --- Move Tool System into Modules
-
-Goal:
-
-Refactor the tool system so tools are no longer defined inside core
-runtime code.
-
-Tools become modules.
-
-Example modules:
-
-tools_filesystem tools_shell tools_http tools_git
-
-Each module registers tools with the runtime.
-
-This allows users to:
-
-add tools disable tools create third‑party tools
-
-This completes the **core modular architecture**.
-
-------------------------------------------------------------------------
-
-# Non‑Goals (Out of Scope for Current Phases)
-
-The following features are intentionally **not part of the current
-roadmap**.
-
-They may be explored after v0.7.
-
-------------------------------------------------------------------------
-
-## Memory Systems
-
-Conversation memory vector stores long‑term agent memory
-
-Memory architectures significantly increase complexity.
-
-They should not be implemented until the runtime architecture
-stabilizes.
-
-------------------------------------------------------------------------
-
-## Multi‑Agent Systems
-
-Agent‑to‑agent collaboration autonomous agent networks cooperative
-reasoning
-
-Most frameworks introduce these prematurely.
-
-CortX should remain **single pipeline execution** for now.
-
-------------------------------------------------------------------------
-
-## Autonomous Planning Loops
-
-Recursive planning self‑directed agents goal‑seeking execution
-
-These introduce instability and unpredictable execution.
-
-They belong in **optional modules** later.
-
-------------------------------------------------------------------------
-
-## Distributed Inference Scheduling
-
-Load balancing model inference across hosts.
-
-Future possibility:
-
-CortX model gateway multiple inference hosts
-
-But this should not be built until the platform architecture is stable.
-
-------------------------------------------------------------------------
-
-# Long‑Term Vision
-
-By the time CortX approaches v1.0 the system should provide:
-
--   a stable runtime platform
--   a module ecosystem
--   configurable pipelines
--   hybrid model support
--   distribution builds
-
-At that point CortX becomes:
-
-**A local‑first runtime for building intelligent systems.**
