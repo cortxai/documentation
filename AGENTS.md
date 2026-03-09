@@ -24,11 +24,11 @@ The project uses strict semantic-style version identifiers using the format:
 
 Where:
 
-| Component | Meaning |
-|-----------|--------|
-| X | Major version (architectural milestone or major redesign) |
-| Y | Feature branch version |
-| Z | Commit iteration within the branch |
+| Component | Meaning                                                   |
+|-----------|-----------------------------------------------------------|
+| X         | Major version (architectural milestone or major redesign) |
+| Y         | Feature branch version                                    |
+| Z         | Commit iteration within the branch                        |
 
 Example version:
 
@@ -40,7 +40,7 @@ Example version:
 
 ## Creating New Branches
 
-A new development branch **must increment the Y component**.
+A new development branch **must increment the Y component** and **must be branched off of main**.
 
 Example:
 
