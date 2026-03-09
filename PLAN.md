@@ -1,8 +1,8 @@
 # CortX Development Plan (Alpha Roadmap)
 
-**Project:** CortX
-**Organisation:** cortxai
-**Current Version:** v0.4.4
+**Project:** CortX  
+**Organisation:** cortxai  
+**Current Version:** v0.5.0  
 **Status:** Alpha
 
 ---
@@ -49,7 +49,7 @@ The long‑term architecture consists of three conceptual layers:
 
    * Opinionated system builds
    * Provide a complete runnable platform
-   * Example: `cortx_local`
+   * Example: `cortx`
 
 ---
 
@@ -124,13 +124,7 @@ Introduce a **formal `ModelProvider` abstraction** so that the classifier and wo
 
 ### 1 — ModelProvider Interface
 
-File:
-
-```
-coretex/interfaces/model_provider.py
-```
-
-The interface already exists as a stub. Ensure it defines:
+File: `coretex/interfaces/model_provider.py`
 
 ```python
 class ModelProvider(ABC):
@@ -141,68 +135,63 @@ class ModelProvider(ABC):
     async def chat(self, model: str, messages: list, **kwargs) -> str: ...
 ```
 
+---
+
 ### 2 — ModelProviderRegistry Enhancements
 
-File:
-
-```
-coretex/registry/model_registry.py
-```
+File: `coretex/registry/model_registry.py`
 
 Tasks:
 
-1. Ensure `ModelProviderRegistry` is a fully validated registry (already exists in v0.4.4 as `ModelProviderRegistry`).
-2. Support `register(name: str, provider: ModelProvider)` and `get(name: str) -> ModelProvider`.
-3. Enforce:
-   * Duplicate registration raises `ValueError("Model provider already registered: <name>")`
-   * Unknown lookup raises `ValueError("Unknown model provider: <name>")` and logs `event=registry_lookup_failed`
-4. Add `list()` to enumerate registered providers.
-5. Update error messages to be model-provider-specific (parallel to v0.4.0 PipelineRegistry change).
+* Ensure `ModelProviderRegistry` is a fully validated registry.
+* Support `register(name: str, provider: ModelProvider)` and `get(name: str) -> ModelProvider`.
+* Enforce:
+  - Duplicate registration raises `ValueError("Model provider already registered: <name>")`
+  - Unknown lookup raises `ValueError("Unknown model provider: <name>")` and logs `event=registry_lookup_failed`
+* Add `list()` to enumerate registered providers.
+* Update error messages to be model-provider-specific (parallel to v0.4.0 PipelineRegistry change).
+
+---
 
 ### 3 — OllamaProvider Module
 
-File:
+File: `modules/model_provider_ollama/provider.py`
 
-```
-modules/model_provider_ollama/provider.py
-```
+* Implement `OllamaProvider` fully implementing the `ModelProvider` interface:
+  - `generate(model, prompt, **kwargs)` — calls `POST /api/generate` with `stream=False`, returns response text
+  - `chat(model, messages, **kwargs)` — calls `POST /api/chat` with `stream=False`, returns last message content
+* Configure timeouts from `settings.classifier_timeout` / `settings.worker_timeout`
+* Log `event=model_provider_generate_start` / `event=model_provider_generate_complete` with `duration_ms`
 
-The `OllamaProvider` already exists. Ensure it fully implements the `ModelProvider` interface:
-
-* `generate(model, prompt, **kwargs)` — calls `POST /api/generate` with `stream=False`, returns response text
-* `chat(model, messages, **kwargs)` — calls `POST /api/chat` with `stream=False`, returns last message content
-* Configures timeouts from `settings.classifier_timeout` / `settings.worker_timeout`
-* Logs `event=model_provider_generate_start` / `event=model_provider_generate_complete` with `duration_ms`
+---
 
 ### 4 — Classifier Integration
 
-File:
-
-```
-modules/classifier_basic/classifier.py
-```
-
-Changes:
+File: `modules/classifier_basic/classifier.py`
 
 * Remove direct `httpx` client calls from `ClassifierBasic`
 * Inject `model_provider: ModelProvider` at construction or lookup by name from `ModelProviderRegistry`
-* Route all LLM calls through `model_provider.chat(model=settings.classifier_model, messages=[...])`
+* Route all LLM calls through:
+```python
+await model_provider.chat(model=settings.classifier_model, messages=[...])
+```
 * Preserve all existing retry logic, fallback, and structured logging
+
+---
 
 ### 5 — Worker Integration
 
-File:
-
-```
-modules/worker_llm/worker.py
-```
-
-Changes:
+File: `modules/worker_llm/worker.py`
 
 * Remove direct `httpx` client calls from `WorkerLLM`
 * Inject `model_provider: ModelProvider` at construction or lookup from `ModelProviderRegistry`
-* Route all LLM calls through `model_provider.generate(model=settings.worker_model, prompt=...)`
+* Route all LLM calls through:
+```python
+await model_provider.generate(model=settings.worker_model, prompt=...)
+```
 * Preserve existing intent-aware prompts and JSON action envelope behaviour
+
+---
 
 ### 6 — Module Registration
 
@@ -218,18 +207,26 @@ modules/model_provider_ollama/module.py
 * `classifier_basic/module.py` — pass model provider name or instance when creating `ClassifierBasic`
 * `worker_llm/module.py` — pass model provider name or instance when creating `WorkerLLM`
 
+---
+
 ### 7 — Backward Compatibility
 
 * Ensure `POST /ingest` and OpenWebUI continue working with default Ollama configuration
 * Default model provider is `"ollama"` — no configuration change required for existing deployments
 * Environment variables `CLASSIFIER_MODEL` and `WORKER_MODEL` continue to control model selection
 
+---
+
 ### 8 — Observability
 
 * Log model provider name in classifier and worker events:
-  * `event=classifier_start classifier=<name> model_provider=<name>`
-  * `event=worker_start worker=<name> model_provider=<name>`
-* Provider-level events: `event=model_provider_generate_start`, `event=model_provider_generate_complete duration_ms=<int>`
+  - `event=classifier_start classifier=<name> model_provider=<name>`
+  - `event=worker_start worker=<name> model_provider=<name>`
+* Provider-level events:
+  - `event=model_provider_generate_start`
+  - `event=model_provider_generate_complete duration_ms=<int>`
+
+---
 
 ### 9 — Tests
 
@@ -246,7 +243,7 @@ modules/model_provider_ollama/module.py
 
 ## v0.6 — Distribution Layer
 
-* Introduce first **CortX distributions** (e.g., `cortx_local`)
+* Introduce first **CortX distributions** (e.g., `cortx`)
 * Assemble runtime + modules + FastAPI + OpenWebUI
 * Support bootstrapped module loading
 
@@ -298,4 +295,3 @@ After v0.5.X, COREtex will:
 * Enable hybrid model strategies (different providers for classifier and worker)
 * Maintain full determinism and observability
 * Provide a foundation for multi-provider inference in future phases
-
